@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.turbo/
+
+fixtures/next/.next/
+fixtures/next/node_modules/
+fixtures/vite/dist/
+fixtures/vite/node_modules/

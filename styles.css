@@ -1,0 +1,7 @@
+.stackflow-kit-screen__paper {
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+
+.stackflow-kit-screen__edge {
+  -webkit-tap-highlight-color: transparent;
+}

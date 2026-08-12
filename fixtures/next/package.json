@@ -1,0 +1,21 @@
+{
+  "name": "stackflow-kit-next-consumer",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "next build"
+  },
+  "dependencies": {
+    "@stackflow/react": "1.12.0",
+    "@stackflow/react-ui-core": "1.3.3",
+    "next": "15.5.22",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "typescript": "5.8.3"
+  }
+}

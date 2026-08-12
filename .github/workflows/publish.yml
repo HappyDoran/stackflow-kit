@@ -1,0 +1,62 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'package.json과 tag에 있는 정확한 SemVer (예: 0.1.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Require a public source repository
+        if: ${{ github.event.repository.private }}
+        run: |
+          echo 'npm provenance requires a public source repository.' >&2
+          exit 1
+
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.5.1
+
+      - name: Verify immutable release ref and manifest
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          EXPECTED_REF="refs/tags/stackflow-kit-v${RELEASE_VERSION}"
+          test "$RELEASE_VERSION" = "$PACKAGE_VERSION"
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          node -e "const pkg = require('./package.json'); if (pkg.private !== false) throw new Error('package must set private:false'); if (pkg.license !== 'MIT') throw new Error('package must use the approved MIT license');"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build and verify packed consumers
+        run: npm run verify:package
+
+      - name: Publish with npm trusted publishing
+        run: npm publish --access public
