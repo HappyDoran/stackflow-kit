@@ -9,5 +9,3 @@ export const navigationLock = {
   isLocked: () => useNavLockStore.getState().locked,
   release: (token?: NavigationLockToken) => useNavLockStore.getState().unlock(token),
 };
-
-export const useNavigationLocked = () => useNavLockStore(state => state.locked);

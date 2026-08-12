@@ -96,7 +96,7 @@ export function DetailActivity() {
 
 ## Runtime adapter
 
-일반 브라우저에서는 기본 `browserStackflowRuntimeAdapter`가 no-op으로 동작합니다. WebView나 다른 host runtime에서는 back event와 현재 stack 상태를 연결하는 adapter를 주입할 수 있습니다.
+`runtimeAdapter`를 주입하지 않으면 일반 브라우저처럼 동작합니다. WebView나 다른 host runtime에서는 back event와 현재 stack 상태를 연결하는 adapter를 주입합니다.
 
 ```tsx
 import { StackScreen, type StackflowRuntimeAdapter } from '@happydoran/stackflow-kit';
@@ -137,10 +137,12 @@ try {
 
 ## 개발 검증
 
-저장소 루트에서 tarball을 Next.js와 Vite fixture에 설치해 검증합니다.
+navigation lock, guarded action, swipe, screen lifecycle의 동작은 `tests/`가 소유합니다.
 
 ```bash
-npm run verify:stackflow-kit-package
+npm run typecheck
+npm test                 # 동작 테스트 (jsdom)
+npm run verify:package   # tarball을 Next.js와 Vite fixture에 설치해 배포 산출물 검증
 ```
 
 MIT License로 배포합니다. 공개 source repository와 npm scope 권한이 준비되기 전에는 패키지를 배포하지 않습니다.

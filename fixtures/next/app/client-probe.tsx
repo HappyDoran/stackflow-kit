@@ -1,6 +1,6 @@
 'use client';
 
-import { StackScreen, browserStackflowRuntimeAdapter, type StackNavigation } from '@happydoran/stackflow-kit';
+import { StackScreen, type StackNavigation } from '@happydoran/stackflow-kit';
 
 declare module '@happydoran/stackflow-kit' {
   interface StackActivityRegistry {
@@ -17,5 +17,5 @@ function verifyNavigationTypes(navigation: StackNavigation) {
 void verifyNavigationTypes;
 
 export function ClientProbe() {
-  return <p data-adapter={typeof browserStackflowRuntimeAdapter.publishStackState}>{StackScreen.name}</p>;
+  return <p>{StackScreen.name}</p>;
 }

@@ -32,5 +32,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test
+        run: npm test
+
       - name: Build and verify packed consumers
         run: npm run verify:package

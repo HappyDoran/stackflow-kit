@@ -6,10 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { PARALLAX_OFFSET_PX, STACK_TRANSITION_DURATION_MS } from '../constants/stack-transition.constant.js';
 import { useSpringSwipeBack } from '../hooks/use-spring-swipe-back.js';
 import { useStackNavigation } from '../hooks/use-stack-navigation.js';
-import {
-  browserStackflowRuntimeAdapter,
-  type StackflowRuntimeAdapter,
-} from '../runtime/stackflow-runtime-adapter.js';
+import type { StackflowRuntimeAdapter } from '../runtime/stackflow-runtime-adapter.js';
 import { useNavLockStore } from '../stores/nav-lock.state.js';
 
 export type StackScreenRenderContext = {
@@ -30,7 +27,6 @@ export type StackScreenClassNames = {
 export type StackScreenProps = {
   backgroundColor?: string;
   children?: ReactNode;
-  className?: string;
   classNames?: StackScreenClassNames;
   contentStyle?: CSSProperties;
   preventSwipeBack?: boolean;
@@ -105,13 +101,12 @@ const edgeStyle: CSSProperties = {
 export function StackScreen({
   backgroundColor = 'white',
   children,
-  className,
   classNames,
   contentStyle: injectedContentStyle,
   preventSwipeBack = false,
   renderContent = content => content,
   renderHeader,
-  runtimeAdapter = browserStackflowRuntimeAdapter,
+  runtimeAdapter,
 }: StackScreenProps) {
   const activity = useNullableActivity();
   const { pop: stackPop } = useActions();
@@ -132,7 +127,7 @@ export function StackScreen({
 
   useEffect(() => {
     if (!isTop) return;
-    runtimeAdapter.publishStackState?.({ canGoBack: !isRoot });
+    runtimeAdapter?.publishStackState?.({ canGoBack: !isRoot });
   }, [isRoot, isTop, runtimeAdapter]);
 
   const backPressRef = useRef<() => void>(() => {});
@@ -145,7 +140,7 @@ export function StackScreen({
 
   useEffect(() => {
     if (!isTop) return;
-    return runtimeAdapter.subscribeBackPress?.(() => backPressRef.current());
+    return runtimeAdapter?.subscribeBackPress?.(() => backPressRef.current());
   }, [isTop, runtimeAdapter]);
 
   useEffect(() => {
@@ -216,7 +211,7 @@ export function StackScreen({
   return (
     <div
       ref={appScreenRef}
-      className={joinClassNames('stackflow-kit-screen', classNames?.root, className)}
+      className={joinClassNames('stackflow-kit-screen', classNames?.root)}
       style={rootStyle}
       data-stackflow-component-name="AppScreen"
     >

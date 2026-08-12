@@ -17,7 +17,6 @@ export {
   useStackNavigation,
 } from './hooks/use-stack-navigation.js';
 export {
-  browserStackflowRuntimeAdapter,
   type StackflowRuntimeAdapter,
   type StackState,
 } from './runtime/stackflow-runtime-adapter.js';
