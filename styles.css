@@ -5,3 +5,10 @@
 .stackflow-kit-screen__edge {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* 전이 곡선: 스와이프와 같은 스프링을 정지 상태에서 출발시킨 모양 (springLinearEasing 생성값) */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --stackflow-kit-easing: linear(0, 0.0488, 0.1561, 0.2832, 0.409, 0.5232, 0.6217, 0.7038, 0.7706, 0.8239, 0.8659, 0.8987, 0.924, 0.9433, 0.9581, 0.9693, 0.9777, 0.984, 0.9887, 0.9922, 0.9948, 0.9967, 0.9982, 0.9992, 1);
+  }
+}

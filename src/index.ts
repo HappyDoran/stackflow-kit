@@ -1,6 +1,7 @@
 export {
-  PARALLAX_OFFSET_PX,
+  PARALLAX_OFFSET_RATIO,
   STACK_TRANSITION_DURATION_MS,
+  STACK_TRANSITION_EASING,
 } from './constants/stack-transition.constant.js';
 export {
   StackScreen,

@@ -1,7 +1,7 @@
 {
   "name": "@happydoran/stackflow-kit",
   "private": false,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Runtime-agnostic StackFlow navigation lock, guarded actions, swipe-back, and screen adapters for React.",
   "keywords": [
     "stackflow",

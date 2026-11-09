@@ -24,6 +24,14 @@ npm install @happydoran/stackflow-kit @stackflow/react @stackflow/react-ui-core 
 import '@happydoran/stackflow-kit/styles.css';
 ```
 
+### 전환 동작
+
+push·pop과 swipe-back은 같은 임계 감쇠 스프링으로 움직입니다. swipe-back은 손을 뗀 속도에서, push·pop은 정지 상태에서 출발합니다.
+
+- push·pop 곡선은 `styles.css`의 CSS `linear()` 값(`--stackflow-kit-easing`)입니다. `linear()`를 지원하지 않는 브라우저(iOS 17.2 미만 등)나 `styles.css`를 가져오지 않은 경우에는 같은 스프링에 맞춘 `cubic-bezier` 근사를 씁니다.
+- 아래 화면은 너비의 `PARALLAX_OFFSET_RATIO`(30%)만큼 밀리고, 위 화면의 dim이 10% 어둡게 덮습니다. 아래 화면 위치는 `StackScreen`이 위 화면의 전이와 같은 커밋에서 바꿉니다.
+- 전환 시간은 `STACK_TRANSITION_DURATION_MS`이고, `stackflow()`의 `transitionDuration`에도 같은 값을 넘깁니다.
+
 ## Activity 타입과 안전한 네비게이션
 
 패키지는 별도 provider를 추가하지 않습니다. 소비 애플리케이션이 기존 StackFlow `stackflow()` 설정을 소유하고, module augmentation으로 Activity별 params를 등록합니다.

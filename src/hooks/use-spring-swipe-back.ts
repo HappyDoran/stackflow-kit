@@ -1,14 +1,22 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import { PARALLAX_OFFSET_PX } from '../constants/stack-transition.constant.js';
+import {
+  PARALLAX_OFFSET_RATIO,
+  SPRING_DAMPING,
+  SPRING_STIFFNESS,
+} from '../constants/stack-transition.constant.js';
 import { useNavLockStore } from '../stores/nav-lock.state.js';
 
 /**
- * 스프링 물리 엔진 상수
+ * 스프링 물리 엔진 시간 간격 (ms, 고정 시간 스텝용)
+ * 강성·감쇠·질량은 push·pop 곡선과 공유하므로 상수 파일이 소유합니다.
  */
-const SPRING_STIFFNESS = 400; // 스프링 강성 계수 (Hooke's Law: F = -kx)
-const DAMPING_COEFFICIENT = 40; // 감쇠 계수 (F = -cv)
-const MASS = 1; // 질량
-const DT = 1000 / 60; // 시뮬레이션 시간 간격 (60fps 기준, 고정 시간 스텝용)
+const DT = 1000 / 120;
+
+/**
+ * 커밋된 스와이프를 끝낸 것으로 보는 잔여 거리 (px)
+ * 임계 감쇠라 넘치지 않으므로, 끝에 걸친 몇 px의 꼬리를 기다리지 않고 바로 pop합니다.
+ */
+const COMMIT_SETTLE_PX = 2;
 
 /**
  * 스와이프 제스처 판단 임계값
@@ -26,11 +34,26 @@ const BG_RESTORE_MS = 300;
 type UseSpringSwipeBackArgs = {
   paperRef: RefObject<HTMLDivElement>;
   edgeRef: RefObject<HTMLDivElement>;
+  dimRef?: RefObject<HTMLDivElement | null>;
   preventSwipeBack: boolean;
   onSwipeStart?: () => void;
   onSwipeEnd?: (args: { swiped: boolean }) => void;
   onTransitionEnd?: (args: { swiped: boolean }) => void;
 };
+
+/**
+ * 화면(AppScreen) 바로 아래 화면의 paper 요소를 반환합니다.
+ * basicRendererPlugin은 스택 순서대로 형제 요소를 렌더링하므로 previousElementSibling이 곧 이전 화면입니다.
+ * replace로 나가는 중인 화면(data-stackflow-kit-exiting)은 건너뜁니다. 그 화면은 곧 사라지고 그 아래가 남습니다.
+ */
+export function getBackgroundPaper($screen: Element | null): HTMLElement | null {
+  let previousScreen = $screen?.previousElementSibling;
+  while (previousScreen?.hasAttribute('data-stackflow-kit-exiting')) {
+    previousScreen = previousScreen.previousElementSibling;
+  }
+  if (previousScreen?.getAttribute('data-stackflow-component-name') !== 'AppScreen') return null;
+  return previousScreen.querySelector<HTMLElement>(':scope > .stackflow-kit-screen__paper');
+}
 
 type SwipeCallbacks = Pick<UseSpringSwipeBackArgs, 'onSwipeStart' | 'onSwipeEnd' | 'onTransitionEnd'>;
 
@@ -44,6 +67,7 @@ type SwipeCallbacks = Pick<UseSpringSwipeBackArgs, 'onSwipeStart' | 'onSwipeEnd'
  *
  * @param paperRef - 메인 콘텐츠 영역의 ref
  * @param edgeRef - 스와이프 제스처 감지 영역의 ref (왼쪽 가장자리)
+ * @param dimRef - 뒷 페이지를 덮는 dim의 ref (스와이프 진행에 따라 옅어짐)
  * @param preventSwipeBack - 스와이프 백 비활성화 여부
  * @param onSwipeStart - 스와이프 시작 시 호출되는 콜백
  * @param onSwipeEnd - 스와이프 종료 시 호출되는 콜백
@@ -52,6 +76,7 @@ type SwipeCallbacks = Pick<UseSpringSwipeBackArgs, 'onSwipeStart' | 'onSwipeEnd'
 export function useSpringSwipeBack({
   paperRef,
   edgeRef,
+  dimRef,
   preventSwipeBack,
   onSwipeStart,
   onSwipeEnd,
@@ -74,8 +99,14 @@ export function useSpringSwipeBack({
   useEffect(() => {
     const $paper = paperRef.current;
     const $edge = edgeRef.current;
+    const $dim = dimRef?.current ?? null;
 
     if (preventSwipeBack || !$paper || !$edge) return;
+
+    // 스와이프 중 'none'으로 덮은 전환을 ''로 지우면 화면이 넣어 둔 전환 설정까지 사라져
+    // 다음 버튼 pop이 다른 시간·곡선으로 움직인다. 처음 값을 기억해 되돌린다.
+    const paperTransition = $paper.style.transition;
+    const dimTransition = $dim?.style.transition ?? '';
 
     // 터치 이벤트 상태
     let activeTouchId: number | null = null; // 제스처를 소유한 터치 (멀티터치 간섭 방지)
@@ -104,21 +135,11 @@ export function useSpringSwipeBack({
     let inFlight = false;
 
     // 제스처 시작 시점에 한 번 조회해 캐싱 (매 프레임 DOM 탐색/레이아웃 읽기 방지)
-    let bgPapers: HTMLElement[] = [];
+    let bgPaper: HTMLElement | null = null;
+    // 뒷 페이지의 평상시 위치(패럴랙스)와 전환 설정. 스와이프가 끝나면 지우지 않고 이 값으로 되돌린다.
+    let bgTransform = '';
+    let bgTransition = '';
     let paperWidth = 0;
-
-    /**
-     * 현재 화면 바로 뒤 화면의 paper 요소를 반환
-     * basicRendererPlugin은 스택 순서대로 형제 요소를 렌더링하므로
-     * previousElementSibling이 곧 이전 화면입니다.
-     */
-    const getBackgroundPapers = (): HTMLElement[] => {
-      const $appScreen = $paper.closest('[data-stackflow-component-name="AppScreen"]');
-      const previousScreen = $appScreen?.previousElementSibling as HTMLElement | null;
-      if (previousScreen?.getAttribute('data-stackflow-component-name') !== 'AppScreen') return [];
-      const paper = previousScreen.querySelector('.bg-background');
-      return paper ? [paper as HTMLElement] : [];
-    };
 
     /** 이 제스처를 소유한 터치를 찾음 */
     const getActiveTouch = (touches: TouchList) => {
@@ -154,14 +175,21 @@ export function useSpringSwipeBack({
       $paper.style.transform = `translate3d(${renderX}px, 0, 0)`;
       $paper.style.transition = 'none';
 
+      // dim은 앞 페이지가 빠지는 만큼 옅어진다
+      if ($dim) {
+        $dim.style.opacity = String(1 - Math.min(1, ratio));
+        $dim.style.transition = 'none';
+      }
+
       // Background Card (뒷 페이지) 패럴랙스 효과 적용
-      bgPapers.forEach((bgPaper) => {
-        // ratio에 따라 -PARALLAX_OFFSET_PX에서 0 사이로 이동
-        const parallaxX = -PARALLAX_OFFSET_PX + PARALLAX_OFFSET_PX * ratio;
-        const clampedX = Math.min(0, Math.max(-PARALLAX_OFFSET_PX, parallaxX));
+      if (bgPaper) {
+        // ratio에 따라 -parallaxOffset에서 0 사이로 이동
+        const parallaxOffset = PARALLAX_OFFSET_RATIO * paperWidth;
+        const parallaxX = -parallaxOffset + parallaxOffset * ratio;
+        const clampedX = Math.min(0, Math.max(-parallaxOffset, parallaxX));
         bgPaper.style.transform = `translate3d(${clampedX}px, 0, 0)`;
         bgPaper.style.transition = 'none';
-      });
+      }
     };
 
     /**
@@ -176,10 +204,10 @@ export function useSpringSwipeBack({
       const springForce = -SPRING_STIFFNESS * displacement;
 
       // 감쇠 힘 계산 (F = -cv)
-      const dampingForce = -DAMPING_COEFFICIENT * velocity;
+      const dampingForce = -SPRING_DAMPING * velocity;
 
-      // 가속도 계산 (F = ma)
-      const acceleration = (springForce + dampingForce) / MASS;
+      // 가속도 계산 (질량 1: a = F)
+      const acceleration = springForce + dampingForce;
 
       // 속도와 위치 업데이트
       velocity += acceleration * (DT / 1000);
@@ -193,12 +221,8 @@ export function useSpringSwipeBack({
     const animate = (timeStamp: number) => {
       if (animationId === null) return;
 
-      // 첫 프레임 초기화 (두 번 업데이트하여 초기 속도 생성)
-      if (!lastTimeStamp) {
-        lastTimeStamp = timeStamp;
-        update();
-        update();
-      }
+      // 첫 프레임은 한 스텝만 진행한다. (여러 스텝을 한 번에 진행하면 손 뗀 직후 화면이 튄다)
+      if (!lastTimeStamp) lastTimeStamp = timeStamp - DT;
 
       // 경과 시간 계산 및 누적
       const timeElapsed = Math.min(timeStamp - lastTimeStamp, 64);
@@ -216,7 +240,10 @@ export function useSpringSwipeBack({
       render(alpha);
 
       // 목표 위치에 도달하고 속도가 충분히 낮으면 애니메이션 종료
-      if (Math.abs(targetX - currX) < 1 && Math.abs(velocity) < 10) {
+      const settled = isSwiped
+        ? targetX - currX < COMMIT_SETTLE_PX
+        : Math.abs(targetX - currX) < 1 && Math.abs(velocity) < 10;
+      if (settled) {
         currX = prevX = targetX;
         render(1);
         finishAnimation();
@@ -240,32 +267,22 @@ export function useSpringSwipeBack({
          * 스와이프 성공 시
          * 뒷 페이지를 0 위치로 고정하고 콜백 호출 (AppScreen에서 pop 수행)
          */
-        const papers = bgPapers;
-        papers.forEach((bgPaper) => {
-          bgPaper.style.transform = 'translate3d(0, 0, 0)';
-          // 다음 화면의 pop 애니메이션이 정상 동작하도록 swipe 중 설정한
-          // 인라인 transition을 pop 전에 제거합니다.
-          bgPaper.style.transition = '';
-        });
+        if (bgPaper) {
+          bgPaper.style.transform = '';
+          bgPaper.style.transition = bgTransition;
+        }
 
         inFlight = false;
-        Promise.resolve()
-          .then(() => callbacksRef.current.onTransitionEnd?.({ swiped: true }))
-          .then(
-            () =>
-              new Promise<void>((resolve) => {
-                requestAnimationFrame(() => {
-                  papers.forEach((bgPaper) => {
-                    bgPaper.style.transform = '';
-                    bgPaper.style.transition = '';
-                  });
-                  resolve();
-                });
-              })
-          );
+        Promise.resolve().then(() => callbacksRef.current.onTransitionEnd?.({ swiped: true }));
       } else {
         cleanStyles();
       }
+    };
+
+    const resetDim = () => {
+      if (!$dim) return;
+      $dim.style.opacity = '';
+      $dim.style.transition = dimTransition;
     };
 
     /**
@@ -276,22 +293,18 @@ export function useSpringSwipeBack({
      */
     const cleanStyles = () => {
       $paper.style.transform = '';
-      $paper.style.transition = '';
+      $paper.style.transition = paperTransition;
+      resetDim();
 
-      const papers = bgPapers;
-      if (papers.length > 0) {
-        // Back Card 복구: 패럴랙스 위치로 복구 애니메이션 실행
-        papers.forEach((bgPaper) => {
-          bgPaper.style.transition = `transform ${BG_RESTORE_MS}ms ease-out`;
-          bgPaper.style.transform = `translate3d(-${PARALLAX_OFFSET_PX}px, 0, 0)`;
-        });
+      const $bg = bgPaper;
+      if ($bg) {
+        // Back Card 복구: 평상시 패럴랙스 위치로 복구 애니메이션 실행
+        $bg.style.transition = `transform ${BG_RESTORE_MS}ms ease-out`;
+        $bg.style.transform = bgTransform;
 
         if (cleanupTimeoutId) clearTimeout(cleanupTimeoutId);
         cleanupTimeoutId = setTimeout(() => {
-          papers.forEach((bgPaper) => {
-            bgPaper.style.transform = '';
-            bgPaper.style.transition = '';
-          });
+          $bg.style.transition = bgTransition;
         }, BG_RESTORE_MS);
       }
 
@@ -319,10 +332,12 @@ export function useSpringSwipeBack({
         animationId = null;
       }
 
-      // 이전 취소 스와이프의 뒷 페이지 복구 타이머가 새 제스처의 transform을 지우지 않도록 해제
+      // 이전 취소 스와이프의 뒷 페이지 복구 타이머는 새 제스처를 덮지 않도록 해제하고,
+      // 복구용 전환 설정을 새 제스처가 평상시 값으로 저장하지 않도록 지금 되돌린다
       if (cleanupTimeoutId) {
         clearTimeout(cleanupTimeoutId);
         cleanupTimeoutId = null;
+        if (bgPaper) bgPaper.style.transition = bgTransition;
       }
 
       const touch = e.changedTouches[0];
@@ -339,7 +354,12 @@ export function useSpringSwipeBack({
       isSwiped = false;
       isHorizontalSwipe = null;
 
-      bgPapers = getBackgroundPapers();
+      bgPaper = getBackgroundPaper($paper.closest('[data-stackflow-component-name="AppScreen"]'));
+      // 취소 스프링을 이어받은 제스처는 이미 덮어쓴 값을 다시 저장하지 않는다
+      if (bgPaper && !inFlight) {
+        bgTransform = bgPaper.style.transform;
+        bgTransition = bgPaper.style.transition;
+      }
       paperWidth = $paper.clientWidth;
     };
 
@@ -362,6 +382,8 @@ export function useSpringSwipeBack({
         if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 5) {
           isHorizontalSwipe = true;
           inFlight = true;
+          // 판정 거리만큼 화면이 한 번에 튀지 않도록 판정 지점부터 따라간다
+          startX = touchX;
           callbacksRef.current.onSwipeStart?.();
         } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 5) {
           isHorizontalSwipe = false;
@@ -379,7 +401,7 @@ export function useSpringSwipeBack({
       lastTouchTime = currTime;
 
       // 시작점 왼쪽으로는 끌리지 않도록 클램프
-      const clampedDx = Math.max(0, dx);
+      const clampedDx = Math.max(0, touchX - startX);
       currX = clampedDx;
       prevX = clampedDx;
 
@@ -493,13 +515,14 @@ export function useSpringSwipeBack({
        */
       if (inFlight) {
         $paper.style.transform = '';
-        $paper.style.transition = '';
-        bgPapers.forEach((bgPaper) => {
-          bgPaper.style.transform = '';
-          bgPaper.style.transition = '';
-        });
+        $paper.style.transition = paperTransition;
+        resetDim();
+        if (bgPaper) {
+          bgPaper.style.transform = isSwiped ? '' : bgTransform;
+          bgPaper.style.transition = bgTransition;
+        }
         callbacksRef.current.onTransitionEnd?.({ swiped: isSwiped });
       }
     };
-  }, [preventSwipeBack, paperRef, edgeRef]);
+  }, [preventSwipeBack, paperRef, edgeRef, dimRef]);
 }

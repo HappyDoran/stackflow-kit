@@ -5,6 +5,8 @@ import { useStackNavigation } from '@happydoran/stackflow-kit';
 import { navigationLock } from '@happydoran/stackflow-kit/navigation-lock';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+// silent 락은 스와이프 커밋 전용 내부 계약이라 public export가 아닌 소스를 직접 본다.
+import { useNavLockStore } from '../../src/stores/nav-lock.state.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,8 +27,10 @@ jest.mock('@stackflow/react', () => ({
 }));
 
 let navigation: ReturnType<typeof useStackNavigation>;
+let renderCount = 0;
 
 function Harness() {
+  renderCount += 1;
   navigation = useStackNavigation();
   return null;
 }
@@ -94,5 +98,25 @@ describe('useStackNavigation', () => {
 
     expect(mockActions.pop).toHaveBeenCalledWith(1, { animate: false });
     expect(mockActions.replace).toHaveBeenCalledWith('HomeActivity', { guest: true }, { animate: false });
+  });
+
+  it('silent 락은 네비게이션을 막지만 구독 화면을 다시 렌더링하지 않는다', () => {
+    const before = renderCount;
+    act(() => {
+      useNavLockStore.getState().lock({ silent: true });
+    });
+
+    expect(renderCount).toBe(before);
+    expect(navigation.isTransitioning).toBe(false);
+    act(() => navigation.push('BodyAnalysisGuideActivity'));
+    expect(mockActions.push).not.toHaveBeenCalled();
+  });
+
+  it('일반 락은 전이 중으로 표시한다', () => {
+    act(() => {
+      useNavLockStore.getState().lock();
+    });
+
+    expect(navigation.isTransitioning).toBe(true);
   });
 });

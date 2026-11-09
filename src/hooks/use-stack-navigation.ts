@@ -47,8 +47,8 @@ export function useStackNavigation(): StackNavigation {
   const stack = useStack();
   const isIdle = stack.globalTransitionState === 'idle';
 
-  // 버튼 disabled 등 UI 표시를 위해 락 상태를 구독합니다.
-  const locked = useNavLockStore(state => state.locked);
+  // 버튼 disabled 등 UI 표시를 위해 락 상태를 구독합니다. silent 락은 표시하지 않습니다.
+  const locked = useNavLockStore(state => state.locked && !state.silent);
 
   /**
    * 네비게이션 가능 여부를 렌더 사이클과 무관하게 동기적으로 판단합니다.

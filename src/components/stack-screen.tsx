@@ -1,10 +1,10 @@
 'use client';
 
 import { useActions, useStack } from '@stackflow/react';
-import { useNullableActivity, usePreventTouchDuringTransition, useStyleEffectOffset } from '@stackflow/react-ui-core';
+import { useNullableActivity, usePreventTouchDuringTransition } from '@stackflow/react-ui-core';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { PARALLAX_OFFSET_PX, STACK_TRANSITION_DURATION_MS } from '../constants/stack-transition.constant.js';
-import { useSpringSwipeBack } from '../hooks/use-spring-swipe-back.js';
+import { PARALLAX_OFFSET_RATIO, STACK_TRANSITION_DURATION_MS, STACK_TRANSITION_EASING } from '../constants/stack-transition.constant.js';
+import { getBackgroundPaper, useSpringSwipeBack } from '../hooks/use-spring-swipe-back.js';
 import { useStackNavigation } from '../hooks/use-stack-navigation.js';
 import type { StackflowRuntimeAdapter } from '../runtime/stackflow-runtime-adapter.js';
 import { useNavLockStore } from '../stores/nav-lock.state.js';
@@ -47,16 +47,18 @@ const rootStyle: CSSProperties = {
 };
 
 const dimStyle: CSSProperties = {
-  backgroundColor: 'rgb(0 0 0 / 0.5)',
+  // iOS처럼 뒷 페이지를 살짝만 어둡게 한다
+  backgroundColor: 'rgb(0 0 0 / 0.1)',
   inset: 0,
   position: 'absolute',
-  transitionProperty: 'opacity',
-  transitionTimingFunction: 'ease-out',
+  // 스와이프 훅이 style.transition으로 읽고 되돌리므로 shorthand로 둔다
+  transition: `opacity ${STACK_TRANSITION_DURATION_MS}ms ${STACK_TRANSITION_EASING}`,
   zIndex: 0,
 };
 
 const touchBlockerStyle: CSSProperties = {
   backgroundColor: 'transparent',
+  display: 'none',
   inset: 0,
   pointerEvents: 'auto',
   position: 'absolute',
@@ -64,14 +66,17 @@ const touchBlockerStyle: CSSProperties = {
   zIndex: 2147483647,
 };
 
+const paperTransition = `transform ${STACK_TRANSITION_DURATION_MS}ms ${STACK_TRANSITION_EASING}`;
+const backgroundOffsetTransform = `translate3d(-${PARALLAX_OFFSET_RATIO * 100}%, 0, 0)`;
+
 const paperStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   height: '100%',
   inset: 0,
   position: 'absolute',
-  transitionProperty: 'transform',
-  transitionTimingFunction: 'ease-out',
+  // 스와이프 훅과 뒷 페이지 패럴랙스가 style.transition으로 읽고 되돌리므로 shorthand로 둔다
+  transition: paperTransition,
   width: '100%',
   zIndex: 10,
 };
@@ -116,6 +121,10 @@ export function StackScreen({
   const appScreenRef = useRef<HTMLDivElement>(null!);
   const paperRef = useRef<HTMLDivElement>(null!);
   const edgeRef = useRef<HTMLDivElement>(null!);
+  const dimRef = useRef<HTMLDivElement>(null);
+  const touchBlockerRef = useRef<HTMLDivElement>(null!);
+  // 백 프레스 가드는 렌더를 기다리지 않고 제스처 시작 즉시 막아야 한다
+  const isSwipingRef = useRef(false);
   const swipeLockToken = useRef<number | null>(null);
 
   const isRoot = activity?.isRoot ?? false;
@@ -123,7 +132,6 @@ export function StackScreen({
   const isTop = activity?.isTop ?? false;
 
   const [isEntered, setIsEntered] = useState(isRoot);
-  const [isSwiping, setIsSwiping] = useState(false);
 
   useEffect(() => {
     if (!isTop) return;
@@ -133,7 +141,7 @@ export function StackScreen({
   const backPressRef = useRef<() => void>(() => {});
   useEffect(() => {
     backPressRef.current = () => {
-      if (preventSwipeBack || isRoot || isSwiping) return;
+      if (preventSwipeBack || isRoot || isSwipingRef.current) return;
       pop();
     };
   });
@@ -150,21 +158,43 @@ export function StackScreen({
   usePreventTouchDuringTransition({ ref: appScreenRef });
 
   useLayoutEffect(() => {
-    if (!isRoot && !isEntered) {
-      const animationFrame = requestAnimationFrame(() => setIsEntered(true));
-      return () => cancelAnimationFrame(animationFrame);
-    }
+    if (isRoot || isEntered) return;
+    // 시작 위치(100%)를 스타일로 확정한 뒤 같은 커밋에서 진입시킨다.
+    // 다음 프레임으로 미루면 뒷 페이지 패럴랙스보다 한 프레임 이상 늦게 출발한다.
+    void paperRef.current?.offsetWidth;
+    setIsEntered(true);
   }, [isRoot, isEntered]);
 
-  useStyleEffectOffset({
-    refs: isSwiping ? [] : [paperRef],
-    offsetStyles: {
-      transform: `translate3d(-${PARALLAX_OFFSET_PX}px, 0, 0)`,
-      opacity: '1',
+  // 바로 아래 화면의 패럴랙스는 이 화면의 전이와 같은 커밋에서 건다.
+  // react-ui-core useStyleEffectOffset은 pop 때 복귀를 rAF 네 번 뒤로 미뤄, 앞 페이지보다 늦게 출발하며 끊겨 보였다.
+  // transition은 ''로 지우지 않고 paper 기본값으로 둔다(지우면 그 화면의 다음 전이가 다른 시간·곡선으로 움직인다).
+  // 아래 화면은 매번 다시 찾는다. replace로 아래 화면이 바뀌면 처음 찾은 화면은 이미 사라졌다.
+  const isExiting = transitionState.startsWith('exit');
+  const backgroundPaperRef = useRef<HTMLElement | null>(null);
+  const isExitingRef = useRef(isExiting);
+  useLayoutEffect(() => {
+    isExitingRef.current = isExiting;
+    if (isRoot) return;
+    const $back = getBackgroundPaper(appScreenRef.current);
+    if (!$back) return;
+    backgroundPaperRef.current = $back;
+    $back.style.transition = paperTransition;
+    $back.style.transform = isExiting ? '' : backgroundOffsetTransform;
+  }, [isRoot, isExiting]);
+  useLayoutEffect(
+    () => () => {
+      // exit 상태를 거치지 않고 내려가도 아래 화면이 밀린 채 남지 않게 한다.
+      // exit를 거쳤다면 이미 되돌렸고, replace라면 새 화면이 같은 아래 화면을 다시 밀어 둔 상태다.
+      if (!isExitingRef.current && backgroundPaperRef.current) backgroundPaperRef.current.style.transform = '';
     },
-    transitionDuration: `${STACK_TRANSITION_DURATION_MS}ms`,
-    hasEffect: true,
-  });
+    []
+  );
+
+  // 제스처 첫 프레임에 리렌더가 끼지 않도록 React 상태 없이 DOM과 ref로만 표시한다
+  const setSwiping = useCallback((swiping: boolean) => {
+    isSwipingRef.current = swiping;
+    if (touchBlockerRef.current) touchBlockerRef.current.style.display = swiping ? 'block' : 'none';
+  }, []);
 
   const handleSwipeTransitionEnd = useCallback(
     ({ swiped }: { swiped: boolean }) => {
@@ -179,23 +209,25 @@ export function StackScreen({
           if (ownsLock) requestAnimationFrame(() => useNavLockStore.getState().unlock(token));
         } else if (paperRef.current) {
           paperRef.current.style.transform = '';
-          paperRef.current.style.transition = '';
+          paperRef.current.style.transition = paperTransition;
         }
-        setIsSwiping(false);
+        setSwiping(false);
         return;
       }
-      setIsSwiping(false);
+      setSwiping(false);
     },
-    [stackPop]
+    [setSwiping, stackPop]
   );
 
   useSpringSwipeBack({
     paperRef,
     edgeRef,
+    dimRef,
     preventSwipeBack: preventSwipeBack || isRoot,
-    onSwipeStart: () => setIsSwiping(true),
+    onSwipeStart: () => setSwiping(true),
     onSwipeEnd: ({ swiped }) => {
-      if (swiped) swipeLockToken.current = useNavLockStore.getState().lock();
+      // 손 뗀 프레임에 락 구독 화면 전체가 리렌더되지 않도록 silent 락을 쓴다(네비게이션 차단은 동일).
+      if (swiped) swipeLockToken.current = useNavLockStore.getState().lock({ silent: true });
     },
     onTransitionEnd: handleSwipeTransitionEnd,
   });
@@ -214,21 +246,24 @@ export function StackScreen({
       className={joinClassNames('stackflow-kit-screen', classNames?.root)}
       style={rootStyle}
       data-stackflow-component-name="AppScreen"
+      data-stackflow-kit-exiting={isExiting || undefined}
     >
       {!isRoot && (
         <div
+          ref={dimRef}
           className={joinClassNames('stackflow-kit-screen__dim', classNames?.dim)}
           style={{
             ...dimStyle,
             opacity: isEntered && !(transitionState === 'exit-active' && isTop) ? 1 : 0,
-            transitionDuration: `${STACK_TRANSITION_DURATION_MS}ms`,
           }}
         />
       )}
 
-      {isSwiping && (
-        <div className={joinClassNames('stackflow-kit-screen__touch-blocker', classNames?.touchBlocker)} style={touchBlockerStyle} />
-      )}
+      <div
+        ref={touchBlockerRef}
+        className={joinClassNames('stackflow-kit-screen__touch-blocker', classNames?.touchBlocker)}
+        style={touchBlockerStyle}
+      />
 
       <div
         ref={paperRef}
@@ -237,7 +272,6 @@ export function StackScreen({
           ...paperStyle,
           backgroundColor,
           transform: getTransform(),
-          transitionDuration: `${STACK_TRANSITION_DURATION_MS}ms`,
         }}
       >
         {header}

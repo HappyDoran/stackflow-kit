@@ -16,11 +16,14 @@ type NavLockState = {
   locked: boolean;
   /** 현재 락을 소유한 토큰 (미잠금 시 0) */
   token: number;
+  /** 화면 표시(버튼 비활성 등)에 알리지 않는 락인지 여부 */
+  silent: boolean;
   /**
    * 네비게이션 시작 시 동기적으로 잠급니다.
    * 반환된 토큰을 이용해, 해당 동작이 건 락만 안전하게 해제할 수 있습니다.
+   * silent 락도 네비게이션은 똑같이 막지만, 락 상태를 구독하는 화면을 다시 렌더링하지 않습니다.
    */
-  lock: () => number;
+  lock: (options?: { silent?: boolean }) => number;
   /**
    * 잠금을 해제합니다.
    * - token을 넘기면 현재 소유 토큰과 일치할 때만 해제합니다.
@@ -53,15 +56,16 @@ const clearFallbackTimer = () => {
 export const useNavLockStore = create<NavLockState>((set, get) => ({
   locked: false,
   token: 0,
-  lock: () => {
+  silent: false,
+  lock: options => {
     const token = ++tokenCounter;
     clearFallbackTimer();
     fallbackTimer = setTimeout(() => {
       fallbackTimer = null;
       // 여전히 같은 토큰이 소유 중일 때만 안전 해제합니다.
-      if (get().token === token) set({ locked: false, token: 0 });
+      if (get().token === token) set({ locked: false, token: 0, silent: false });
     }, FALLBACK_UNLOCK_MS);
-    set({ locked: true, token });
+    set({ locked: true, token, silent: options?.silent ?? false });
     return token;
   },
   unlock: (token?: number) => {
@@ -70,6 +74,6 @@ export const useNavLockStore = create<NavLockState>((set, get) => ({
     // 토큰이 지정됐는데 소유 토큰과 다르면, 이미 다른 동작이 락을 넘겨받은 것이므로 무시합니다.
     if (token !== undefined && token !== state.token) return;
     clearFallbackTimer();
-    set({ locked: false, token: 0 });
+    set({ locked: false, token: 0, silent: false });
   },
 }));

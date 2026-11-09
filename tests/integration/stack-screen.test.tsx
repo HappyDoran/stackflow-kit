@@ -103,4 +103,71 @@ describe('StackScreen runtime adapter', () => {
     act(() => backPressHandler?.());
     expect(mockActions.pop).toHaveBeenCalledTimes(1);
   });
+
+  it('아래 화면 패럴랙스를 진입 커밋에서 걸고 pop 커밋에서 바로 풀며 전환 설정은 유지한다', () => {
+    mockActivity = { isRoot: false, isTop: true, transitionState: 'enter-active' };
+    const renderStack = () =>
+      root.render(
+        <>
+          <div data-stackflow-component-name="AppScreen">
+            <div className="stackflow-kit-screen__paper" data-testid="background" />
+          </div>
+          <StackScreen />
+        </>
+      );
+    act(renderStack);
+
+    const background = container.querySelector<HTMLElement>('[data-testid="background"]')!;
+    const transition = background.style.transition;
+    expect(background.style.transform).toContain('-30%');
+    expect(transition).toContain('transform 350ms');
+
+    mockActivity = { ...mockActivity, transitionState: 'exit-active' };
+    act(renderStack);
+
+    expect(background.style.transform).toBe('');
+    expect(background.style.transition).toBe(transition);
+  });
+
+  it('replace로 나가는 중인 화면은 건너뛰고 그 아래 화면을 민다', () => {
+    mockActivity = { isRoot: false, isTop: true, transitionState: 'enter-active' };
+    act(() =>
+      root.render(
+        <>
+          <div data-stackflow-component-name="AppScreen">
+            <div className="stackflow-kit-screen__paper" data-testid="below" />
+          </div>
+          <div data-stackflow-component-name="AppScreen" data-stackflow-kit-exiting="true">
+            <div className="stackflow-kit-screen__paper" data-testid="replaced" />
+          </div>
+          <StackScreen />
+        </>
+      )
+    );
+
+    expect(container.querySelector<HTMLElement>('[data-testid="below"]')!.style.transform).toContain('-30%');
+    expect(container.querySelector<HTMLElement>('[data-testid="replaced"]')!.style.transform).toBe('');
+  });
+
+  it('exit를 거쳐 내려간 화면은 아래 화면을 다시 건드리지 않는다', () => {
+    mockActivity = { isRoot: false, isTop: true, transitionState: 'exit-done' };
+    const renderStack = (withScreen: boolean) =>
+      root.render(
+        <>
+          <div data-stackflow-component-name="AppScreen">
+            <div className="stackflow-kit-screen__paper" data-testid="below" />
+          </div>
+          {withScreen && <StackScreen />}
+        </>
+      );
+    act(() => renderStack(true));
+    const below = container.querySelector<HTMLElement>('[data-testid="below"]')!;
+    // replace로 들어온 새 화면이 같은 아래 화면을 다시 밀어 둔 상황
+    below.style.transform = 'translate3d(-30%, 0, 0)';
+
+    act(() => renderStack(false));
+
+    expect(below.style.transform).toBe('translate3d(-30%, 0, 0)');
+  });
 });
+
